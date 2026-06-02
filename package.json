@@ -1,22 +1,24 @@
 {
-    "description": "qr",
-    "main": "./index.js",
-  "engines" : { 
-    "npm" : ">=9.7.2",
-    "node" : ">=20.0.0"
-    },
-    "scripts": {
+  "name": "whatsapp-bot",
+  "version": "1.0.0",
+  "description": "qr and pairing code bot",
+  "main": "./index.js",
+  "engines": {
+    "npm": ">=9.7.2",
+    "node": ">=20.0.0"
+  },
+  "scripts": {
     "start": "pm2 start index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "npm:baileys-pro",
+    "@whiskeysockets/baileys": "^6.7.9",
     "qrcode": "^1.5.3",
-    "awesome-phonenumber": "^2.64.0",
-    "pino": "^8.1.0",
-    "pm2": "latest",
-    "phone" : "3.1.30",
-    "body-parser": "^1.20.1",
-    "express": "^4.18.1",
+    "awesome-phonenumber": "^5.0.0",
+    "pino": "^8.14.0",
+    "pm2": "^5.3.0",
+    "phone": "^3.1.30",
+    "body-parser": "^1.20.2",
+    "express": "^4.18.2",
     "path": "^0.12.7"
-   }
+  }
 }
