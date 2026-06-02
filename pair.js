@@ -3,7 +3,7 @@ const { create } = require('./session');
 const { makeid } = require('./id');
 const express = require('express');
 const fs = require('fs');
-const path = require('path'); // path മോഡ്യൂൾ ചേർത്തു
+const path = require('path'); // 1. ഇത് ഇവിടെ ഉണ്ടെന്ന് ഉറപ്പാക്കി
 let router = express.Router();
 const pino = require("pino");
 const {
@@ -26,12 +26,17 @@ router.get('/', async (req, res) => {
         return res.status(400).send({ error: "Number is required" });
     }
 
-    // 1. നമ്പറിലെ സ്പേസും ചിഹ്നങ്ങളും ആദ്യമേ തന്നെ കളയുന്നു
     num = num.replace(/[^0-9]/g, '');
 
+    // 2. temp ഫോൾഡർ ഇല്ലെങ്കിൽ അത് നിർമ്മിക്കുന്നു
+    const tempDir = path.join(__dirname, 'temp');
+    if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    const sessionPath = path.join(tempDir, id);
+
     async function getPaire() {
-        // കൃത്യമായ പാത്ത് ലഭിക്കാൻ path.join ഉപയോഗിക്കുന്നു
-        const sessionPath = path.join(__dirname, 'temp', id);
         const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
         
         try {
@@ -42,15 +47,14 @@ router.get('/', async (req, res) => {
                 },
                 printQRInTerminal: false,
                 logger: pino({level: "fatal"}).child({level: "fatal"}),
-                // ❌ പഴയ 'Browsers.macOS' മാറ്റി കൃത്യമായ അറേ നൽകി (ഇതാണ് 'Couldn't link' മാറ്റുന്നത്)
                 browser: ["Ubuntu", "Chrome", "20.0.04"] 
              });
 
             if (!session.authState.creds.registered) {
-                await delay(3000); // കണക്ഷൻ റെഡിയാകാൻ 3 സെക്കന്റ് സമയം നൽകുന്നു
+                await delay(3000); 
                 const code = await session.requestPairingCode(num);
                 if (!res.headersSent) {
-                    await res.send({ code });
+                    return res.send({ code }); // return ചേർത്തത് കൊണ്ട് ഡബിൾ റെസ്പോൺസ് ഒഴിവാകും
                 }
             }
 
@@ -62,12 +66,10 @@ router.get('/', async (req, res) => {
                 if (connection == "open") {
                     await delay(5000);
 
-                    // സെഷൻ ഫയൽ കൃത്യമായ പാത്തിൽ നിന്ന് റീഡ് ചെയ്യുന്നു
                     const credsFile = path.join(sessionPath, 'creds.json');
                     const jsonData = await fs.promises.readFile(credsFile, 'utf-8');     
                     const { id: data } = await create(jsonData);
                     
-                    // സെഷൻ കോഡ് വാട്സാപ്പിലേക്ക് അയക്കുന്നു
                     await session.sendMessage(session.user.id, { text: 'bot~' + data });
 
                     await delay(2000);
@@ -79,10 +81,12 @@ router.get('/', async (req, res) => {
                 }
             });
         } catch (err) {
-            console.log("service restated", err);
+            // യഥാർത്ഥ എറർ എന്താണെന്ന് ടെർമിനലിൽ കാണാൻ ഇത് സഹായിക്കും
+            console.error("🔴 Actual Error Details:", err); 
+            
             removeFile(sessionPath);
             if (!res.headersSent) {
-                await res.send({ code: "Service Unavailable" });
+                return res.status(500).send({ code: "Service Unavailable", details: err.message });
             }
         }
     }
