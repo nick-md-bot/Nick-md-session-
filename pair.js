@@ -3,14 +3,13 @@ const { create } = require('./session');
 const { makeid } = require('./id');
 const express = require('express');
 const fs = require('fs');
-const path = require('path'); // പാത്ത് കൃത്യമാക്കാൻ ആവശ്യമാണ്
+const path = require('path'); // path മോഡ്യൂൾ ചേർത്തു
 let router = express.Router();
 const pino = require("pino");
 const {
     default: makeWASocket,
     useMultiFileAuthState,
     delay,
-    Browsers,
     makeCacheableSignalKeyStore
 } = require("@whiskeysockets/baileys");
 
@@ -24,14 +23,17 @@ router.get('/', async (req, res) => {
     let num = req.query.number;
 
     if (!num) {
-        return res.status(400).send({ error: "Number parameter is required" });
+        return res.status(400).send({ error: "Number is required" });
     }
 
-    // കൃത്യമായ ഒരു ഫോൾഡർ പാത്ത് സെറ്റ് ചെയ്യുന്നു
-    const sessionDir = path.join(__dirname, 'temp', id);
+    // 1. നമ്പറിലെ സ്പേസും ചിഹ്നങ്ങളും ആദ്യമേ തന്നെ കളയുന്നു
+    num = num.replace(/[^0-9]/g, '');
 
     async function getPaire() {
-        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+        // കൃത്യമായ പാത്ത് ലഭിക്കാൻ path.join ഉപയോഗിക്കുന്നു
+        const sessionPath = path.join(__dirname, 'temp', id);
+        const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+        
         try {
             let session = makeWASocket({
                 auth: {
@@ -40,24 +42,15 @@ router.get('/', async (req, res) => {
                 },
                 printQRInTerminal: false,
                 logger: pino({level: "fatal"}).child({level: "fatal"}),
-                // ഇവിടെ ബ്രൗസർ മാറ്റിയിട്ടുണ്ട് (പെയറിംഗ് കോഡിന് ഇത് നിർബന്ധമാണ്)
+                // ❌ പഴയ 'Browsers.macOS' മാറ്റി കൃത്യമായ അറേ നൽകി (ഇതാണ് 'Couldn't link' മാറ്റുന്നത്)
                 browser: ["Ubuntu", "Chrome", "20.0.04"] 
              });
 
             if (!session.authState.creds.registered) {
-                await delay(2000); // 2 സെക്കൻഡ് ഡിലേ നൽകുന്നത് നല്ലതാണ്
-                num = num.replace(/[^0-9]/g, '');
-                
-                try {
-                    const code = await session.requestPairingCode(num);
-                    if (!res.headersSent) {
-                        return res.send({ code });
-                    }
-                } catch (err) {
-                    console.error("Pairing code error:", err);
-                    if (!res.headersSent) {
-                        return res.status(500).send({ code: "Failed to generate code" });
-                    }
+                await delay(3000); // കണക്ഷൻ റെഡിയാകാൻ 3 സെക്കന്റ് സമയം നൽകുന്നു
+                const code = await session.requestPairingCode(num);
+                if (!res.headersSent) {
+                    await res.send({ code });
                 }
             }
 
@@ -69,45 +62,32 @@ router.get('/', async (req, res) => {
                 if (connection == "open") {
                     await delay(5000);
 
-                    try {
-                        // ഫയൽ പാത്ത് ശരിയാക്കി
-                        const credsFile = path.join(sessionDir, 'creds.json');
-                        const jsonData = await fs.promises.readFile(credsFile, 'utf-8');     
-                        const { id: data } = await create(jsonData);
-                        
-                        // ജിദ് ലിങ്ക് കൃത്യമാക്കി
-                        const userJid = session.user.id.split(":")[0] + "@s.whatsapp.net";
-                        await session.sendMessage(userJid, { text: 'bot~' + data });
-
-                        await delay(2000);
-                        await session.ws.close();
-                        removeFile(sessionDir);
-                    } catch (e) {
-                        console.log("Error in open connection:", e);
-                    }
+                    // സെഷൻ ഫയൽ കൃത്യമായ പാത്തിൽ നിന്ന് റീഡ് ചെയ്യുന്നു
+                    const credsFile = path.join(sessionPath, 'creds.json');
+                    const jsonData = await fs.promises.readFile(credsFile, 'utf-8');     
+                    const { id: data } = await create(jsonData);
                     
-                } else if (connection === "close") {
-                    const statusCode = lastDisconnect?.error?.output?.statusCode;
-                    // 401 (Logged out) അല്ലെങ്കിൽ ബോട്ട് ഓപ്പൺ ആയിക്കഴിഞ്ഞാൽ വീണ്ടും റൺ ചെയ്യരുത്
-                    if (statusCode !== 401 && connection !== "open") {
-                        await delay(10000);
-                        // പഴയ കണക്ഷൻ ക്ലോസ് ചെയ്ത് വീണ്ടും ട്രൈ ചെയ്യാം
-                        getPaire();
-                    } else {
-                        removeFile(sessionDir);
-                    }
+                    // സെഷൻ കോഡ് വാട്സാപ്പിലേക്ക് അയക്കുന്നു
+                    await session.sendMessage(session.user.id, { text: 'bot~' + data });
+
+                    await delay(2000);
+                    await session.ws.close();
+                    return removeFile(sessionPath);
+                } else if (connection === "close" && lastDisconnect && lastDisconnect.error && lastDisconnect.error.output.statusCode != 401) {
+                    await delay(10000);
+                    getPaire();
                 }
             });
         } catch (err) {
-            console.log("Service error, restated:", err);
-            removeFile(sessionDir);
+            console.log("service restated", err);
+            removeFile(sessionPath);
             if (!res.headersSent) {
-                res.send({ code: "Service Unavailable" });
+                await res.send({ code: "Service Unavailable" });
             }
         }
     }
 
-    await getPaire();
+    return await getPaire();
 });
 
 module.exports = router;
